@@ -12,23 +12,36 @@ if (-not [System.Diagnostics.EventLog]::SourceExists($source)) {
     New-EventLog -LogName $logName -Source $source
 }
 
-# Download OSThreadDump
-try {
-    Invoke-WebRequest -Uri "https://github.com/OutSystems/techsupp-osdiagtool/releases/download/v-threads-cmd/OSDiagTool-v-threads-cmd.zip" -OutFile ".\OSDiagTool-v-threads-cmd.zip"
-    Write-Host "OSDiagTool download complete"
-} catch {
-    Write-Host "Error occurred downloading OSDiagTool"
-    Write-EventLog -LogName $logName -Source $source -EntryType "Warning" -EventId $errorEventId -Message "Error running IIS collection script - error downloading OSDiagTool"
-    exit 1
-}
+# Download OSDiagTool
+$filePath = ".\OSDiagTool-v-threads-cmd.zip"
 
+if (Test-Path $filePath) {
+    Write-Host "OSDiagTool already exists. Skipping download."
+} else {
+	try {
+		Invoke-WebRequest -Uri "https://github.com/OutSystems/techsupp-osdiagtool/releases/download/v-threads-cmd/OSDiagTool-v-threads-cmd.zip" -OutFile ".\OSDiagTool-v-threads-cmd.zip"
+		Write-Host "OSDiagTool download complete"
+	} catch {
+		Write-Host "Error occurred downloading OSDiagTool"
+		Write-EventLog -LogName $logName -Source $source -EntryType "Warning" -EventId $errorEventId -Message "Error running IIS collection script - error downloading OSDiagTool"
+		exit 1
+	}
+}
 
 $zipPath = ".\OSDiagTool-v-threads-cmd.zip"
 
 # Unzip package
+$dateSuffix = (Get-Date -Format "yyyy-MM-dd_HH-mm-ss")
+$extractFolder = ".\OSDiagTool-Alarm-$dateSuffix"
+
+if (!(Test-Path $extractFolder)) {
+    New-Item -ItemType Directory -Path $extractFolder | Out-Null
+}
+
 try {
-    Expand-Archive -Path $zipPath -DestinationPath ".\" -Force
-    Write-Host "Unzip of OSDiagTool complete"
+	Write-Host "Starting zip extraction"
+    Expand-Archive -Path $zipPath -DestinationPath $extractFolder -Force
+    Write-Host "Unzip of OSDiagTool and extracted to $extractFolder"
 } catch {
     Write-Host "Error occurred while unzipping OSDiagTool" -ForegroundColor Red
     Write-Host "Message: $($_.Exception.Message)" -ForegroundColor Red
@@ -39,7 +52,8 @@ try {
 
 # Run OSDiagTool
 try {
-    Start-Process -FilePath ".\OSDiagTool.exe" -ArgumentList "runcmdline" -NoNewWindow -Wait
+    Write-Host "Starting OSDiagTool run"
+	Start-Process -FilePath "$extractFolder\OSDiagTool.exe" -ArgumentList "runcmdline" -NoNewWindow -Wait
     Write-Output "Thread dumps collected"
 } catch {
     Write-Host "Error running OSDiagTool" -ForegroundColor Red
@@ -49,7 +63,7 @@ try {
 }
 
 # Obtain TCP Dump
-$tcpDumpfile = ".\TCP-Dump.txt"
+$tcpDumpfile = "$extractFolder\TCP-Dump.txt"
 
 try {
     $connections = Get-NetTCPConnection | ForEach-Object {
